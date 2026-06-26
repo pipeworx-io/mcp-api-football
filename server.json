@@ -1,0 +1,18 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.pipeworx-io/api-football",
+  "title": "Api Football",
+  "description": "API-Football MCP — comprehensive soccer/football data",
+  "version": "0.1.0",
+  "websiteUrl": "https://pipeworx.io/packs/api-football",
+  "repository": {
+    "url": "https://github.com/pipeworx-io/mcp-api-football",
+    "source": "github"
+  },
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://gateway.pipeworx.io/api-football/mcp"
+    }
+  ]
+}
