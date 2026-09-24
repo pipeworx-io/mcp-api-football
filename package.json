@@ -1,20 +1,32 @@
 {
   "name": "@pipeworx/mcp-api-football",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "API-Football MCP — comprehensive soccer/football data",
   "type": "module",
   "main": "src/index.ts",
   "types": "src/index.ts",
+  "bin": {
+    "mcp-api-football": "bin/cli.js"
+  },
   "keywords": ["mcp", "mcp-server", "model-context-protocol", "pipeworx", "api-football"],
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/pipeworx-io/mcp-api-football"
+    "url": "git+https://github.com/pipeworx-io/mcp-api-football.git"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"
   },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "tsx": "^4.19.0"
+  },
   "devDependencies": {
-    "typescript": "^5.7.0"
+    "typescript": "^5.9.3",
+    "@cloudflare/workers-types": "^4.20260405.1"
+  },
+  "pipeworx": {
+    "sourceHash": "v1-11e542cfde68d8a569d86b895b1351859c8947b56cbf4557ebaee467b3442a04",
+    "sourceCommit": "60f04b68c347e970c6be94a53439d1364061fc06"
   }
 }
