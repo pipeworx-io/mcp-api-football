@@ -1,6 +1,6 @@
 {
   "name": "@pipeworx/mcp-api-football",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "API-Football MCP — comprehensive soccer/football data",
   "type": "module",
   "main": "src/index.ts",
@@ -26,7 +26,7 @@
     "@cloudflare/workers-types": "^4.20260405.1"
   },
   "pipeworx": {
-    "sourceHash": "v1-11e542cfde68d8a569d86b895b1351859c8947b56cbf4557ebaee467b3442a04",
-    "sourceCommit": "60f04b68c347e970c6be94a53439d1364061fc06"
+    "sourceHash": "v1-b668ccaca64191aa6a53fc6c6f6f089ae67fda3998fe95832f7e3adb11e5ea10",
+    "sourceCommit": "dca20ba6e13a9aa1c9f2918fc2ddaffe4cc30e5c"
   }
 }
