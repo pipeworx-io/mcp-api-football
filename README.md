@@ -16,6 +16,7 @@ Part of [Pipeworx](https://pipeworx.io) — an MCP gateway connecting AI agents 
 | `football_injuries` | Currently injured and unavailable football players for a club or a league — who is out, the injury or reason, and whether they are ruled out or merely doubtful. Covers Serie A, the Premier League, La Liga, the Bundesliga, Ligue 1 and other competitions worldwide. Use for questions about which players are injured, unavailable, or missing from a squad. |
 | `football_squad` | The current player squad for a football club — every player with shirt number, position, age and nationality. Use for questions about who plays for a club, squad lists, and a team roster. |
 | `h2h` | Head-to-head record between two teams. Returns last N matches with scores. |
+| `api_football_status` | API-Football account status for the key in use: subscription plan name, whether it is active and when it ends, requests used today against the daily limit, and the per-minute limit the vendor reports in its rate-limit headers. The vendor does not count this call against the quota. Use it to tell a rate-limit answer from an exhausted plan. Account name and email are deliberately not returned. |
 
 ## Quick Start
 

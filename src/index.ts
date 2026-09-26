@@ -688,6 +688,7 @@ function collapse(s: string): string {
  * - league_search:  look up league_id (e.g. World Cup = 1, EPL = 39)
  * - predictions:    API-Football's own match-outcome probabilities
  * - h2h:            head-to-head record between two teams
+ * - api_football_status: plan, daily usage and per-minute limit of the key in use
  */
 
 
@@ -942,6 +943,17 @@ const tools: McpToolExport['tools'] = [
       required: ['team1', 'team2'],
     },
   },
+  {
+    name: 'api_football_status',
+    description: 'API-Football account status for the key in use: subscription plan name, whether it is active and when it ends, requests used today against the daily limit, and the per-minute limit the vendor reports in its rate-limit headers. The vendor does not count this call against the quota. Use it to tell a rate-limit answer from an exhausted plan. Account name and email are deliberately not returned.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        _apiKey: { type: 'string', description: 'BYO API-Football key.' },
+      },
+      required: [],
+    },
+  },
 ];
 
 async function callTool(name: string, args: Record<string, unknown>): Promise<unknown> {
@@ -1097,6 +1109,46 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<un
       return {
         count: arr.length,
         matches: arr.slice(0, 20).map(projectFixture),
+      };
+    }
+    case 'api_football_status': {
+      const res = await pwFetch(`${BASE_URL}/status`, { headers: headers(apiKey) });
+      if (res.status === 401 || res.status === 403) {
+        return { found: false, reason: 'auth_failed', hint: `API-Football auth failed (${res.status}).` };
+      }
+      if (!res.ok) {
+        return { found: false, reason: 'upstream_error', hint: `API-Football /status ${res.status}`, retry_after_sec: res.status >= 500 ? 15 : null };
+      }
+      const body = (await res.json()) as {
+        errors?: Record<string, string> | string[];
+        response?: {
+          subscription?: { plan?: string; end?: string; active?: boolean };
+          requests?: { current?: number; limit_day?: number };
+        } | unknown[];
+      };
+      const errs = body.errors && (Array.isArray(body.errors) ? body.errors : Object.values(body.errors));
+      if (errs && errs.length > 0) {
+        return { found: false, reason: 'upstream_error', hint: `API-Football: ${errs.join('; ').slice(0, 200)}` };
+      }
+      const r = (Array.isArray(body.response) ? {} : body.response ?? {}) as {
+        subscription?: { plan?: string; end?: string; active?: boolean };
+        requests?: { current?: number; limit_day?: number };
+      };
+      const num = (h: string) => {
+        const v = res.headers.get(h);
+        return v != null && v !== '' && Number.isFinite(Number(v)) ? Number(v) : null;
+      };
+      // Only the plan and usage are projected; the vendor's account block
+      // (holder name, email) is personal data and never leaves the pack.
+      return {
+        plan: r.subscription?.plan ?? null,
+        active: r.subscription?.active ?? null,
+        subscription_end: r.subscription?.end ?? null,
+        requests_today: r.requests?.current ?? null,
+        limit_per_day: r.requests?.limit_day ?? null,
+        limit_per_minute: num('x-ratelimit-limit'),
+        remaining_this_minute: num('x-ratelimit-remaining'),
+        source: 'API-Football /status',
       };
     }
     default:
