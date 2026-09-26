@@ -729,10 +729,77 @@ function missingKeyResponse(tool: string): { found: false; reason: 'missing_api_
 }
 
 type ApiFootballSoftFail =
-  | { found: false; reason: 'rate_limit'; hint: string; retry_after_sec: number }
+  | { found: false; reason: 'rate_limit'; window: 'minute' | 'day'; hint: string; retry_after_sec: number }
   | { found: false; reason: 'auth_failed'; hint: string }
-  | { found: false; reason: 'paid_plan_required'; hint: string; allowed_seasons: string }
+  | { found: false; reason: 'paid_plan_required'; hint: string; allowed_seasons: string | null }
   | { found: false; reason: 'upstream_error'; hint: string; retry_after_sec: number | null };
+
+const MINUTE_LIMIT = /per minute|requests? per min/i;
+const ANY_LIMIT = /too many requests|request limit|rate ?limit|exceeded the limit/i;
+
+function secondsToUtcMidnight(nowMs: number): number {
+  return Math.max(60, 86400 - Math.floor((nowMs / 1000) % 86400));
+}
+
+// API-Football reports a throttle in TWO ways: an HTTP 429, and — more often —
+// an HTTP 200 whose body carries `errors: {rateLimit: "Too many requests. You
+// have exceeded the limit of requests per minute of your subscription."}`.
+// The second one fell through to `upstream_error` with retry_after_sec:null, so
+// a caller told "retry in a minute" was instead told the source was broken
+// (fleet #2447). The two windows need different hints: a per-minute throttle
+// clears in ~60s, a daily one at the UTC reset.
+export function rateLimitSoftFail(message: string, retryAfterHeader: string | null, nowMs: number): ApiFootballSoftFail {
+  const perMinute = MINUTE_LIMIT.test(message) || !/day|daily/i.test(message);
+  const headerSec = retryAfterHeader != null && /^\d+$/.test(retryAfterHeader.trim()) ? Number(retryAfterHeader.trim()) : null;
+  const retry = headerSec ?? (perMinute ? 60 : secondsToUtcMidnight(nowMs));
+  return {
+    found: false,
+    reason: 'rate_limit',
+    window: perMinute ? 'minute' : 'day',
+    hint: perMinute
+      ? `API-Football per-minute rate limit hit; retry in about ${retry}s. (${message.slice(0, 160)})`
+      : `API-Football daily request quota exhausted; it resets at 00:00 UTC (in ~${retry}s). (${message.slice(0, 160)})`,
+    retry_after_sec: retry,
+  };
+}
+
+// Classify a parsed API-Football body. Returns null when the body is a normal
+// answer. Pure so the RED/GREEN cases are unit-testable without the network.
+export function classifyApiFootballBody(
+  data: { errors?: Record<string, string> | string[] },
+  retryAfterHeader: string | null,
+  nowMs: number,
+): ApiFootballSoftFail | null {
+  if (!data.errors || Object.keys(data.errors).length === 0) return null;
+  const msgs = Array.isArray(data.errors) ? data.errors : Object.values(data.errors);
+  const joined = msgs.join('; ');
+  const keys = Array.isArray(data.errors) ? [] : Object.keys(data.errors);
+  if (keys.includes('rateLimit') || keys.includes('requests') || ANY_LIMIT.test(joined)) {
+    return rateLimitSoftFail(joined, retryAfterHeader, nowMs);
+  }
+  // The FREE plan (a BYO free key) blocks seasons outside a window the vendor
+  // names in the error itself — "...try from 2022 to 2024." The window moves
+  // every year, so it is read from that message rather than hard-coded; the
+  // hard-coded "2022-2024" had gone stale (fleet #2447). This branch fires only
+  // on the vendor's own plan error: the platform key is on a paid plan and
+  // answers current seasons (live 2026-09-26: EPL 2026 and 2025 standings).
+  if (/Free plans? do not have access/i.test(joined)) {
+    const m = joined.match(/from\s+(\d{4})\s+to\s+(\d{4})/i);
+    const window = m ? `${m[1]}-${m[2]}` : null;
+    return {
+      found: false,
+      reason: 'paid_plan_required',
+      hint: `API-Football free plan blocks this query: ${joined.slice(0, 200)}${window ? ` Free plans can query seasons ${window}; a paid API-Football plan covers the current season.` : ''}`,
+      allowed_seasons: window,
+    };
+  }
+  return {
+    found: false,
+    reason: 'upstream_error',
+    hint: `API-Football: ${joined.slice(0, 200)}`,
+    retry_after_sec: null,
+  };
+}
 
 async function apiGet(path: string, params: Record<string, string | number | undefined>, apiKey: string): Promise<unknown | ApiFootballSoftFail> {
   const url = new URL(`${BASE_URL}${path}`);
@@ -741,12 +808,8 @@ async function apiGet(path: string, params: Record<string, string | number | und
   }
   const res = await pwFetch(url.toString(), { headers: headers(apiKey) });
   if (res.status === 429) {
-    return {
-      found: false,
-      reason: 'rate_limit',
-      hint: 'API-Football daily rate limit hit (free tier = 100 calls/day). Wait until the daily UTC reset or upgrade.',
-      retry_after_sec: Math.max(60, 86400 - Math.floor((Date.now() / 1000) % 86400)),
-    };
+    const body = (await res.text().catch(() => '')).slice(0, 400);
+    return rateLimitSoftFail(body || 'HTTP 429 Too many requests', res.headers.get('retry-after'), Date.now());
   }
   if (res.status === 401 || res.status === 403) {
     return {
@@ -764,27 +827,8 @@ async function apiGet(path: string, params: Record<string, string | number | und
     };
   }
   const data = (await res.json()) as { errors?: Record<string, string> | string[]; response?: unknown };
-  if (data.errors && Object.keys(data.errors).length > 0) {
-    const msgs = Array.isArray(data.errors) ? data.errors : Object.values(data.errors);
-    const joined = msgs.join('; ');
-    // API-Football's free plan blocks current/future seasons with this
-    // exact error string. Recognize it as a structured paid-plan-required
-    // signal so callers can switch to an allowed-season query or skip.
-    if (/Free plans do not have access/i.test(joined)) {
-      return {
-        found: false,
-        reason: 'paid_plan_required',
-        hint: `API-Football free plan blocks this query: ${joined.slice(0, 200)}`,
-        allowed_seasons: '2022-2024',
-      };
-    }
-    return {
-      found: false,
-      reason: 'upstream_error',
-      hint: `API-Football: ${joined.slice(0, 200)}`,
-      retry_after_sec: null,
-    };
-  }
+  const soft = classifyApiFootballBody(data, res.headers.get('retry-after'), Date.now());
+  if (soft) return soft;
   return data.response ?? data;
 }
 

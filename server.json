@@ -3,7 +3,7 @@
   "name": "io.github.pipeworx-io/api-football",
   "title": "Api Football",
   "description": "API-Football MCP — comprehensive soccer/football data",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "websiteUrl": "https://pipeworx.io/packs/api-football",
   "repository": {
     "url": "https://github.com/pipeworx-io/mcp-api-football",
