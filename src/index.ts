@@ -802,35 +802,77 @@ export function classifyApiFootballBody(
   };
 }
 
+// fleet #2460: the platform key is on the Pro plan (300/min, 7,500/day), yet
+// about one call in three comes back "exceeded the limit of requests per
+// minute" while /status in the same second reports 294-299 of 300 left. The
+// refusal is the vendor's, not our volume (measured 2026-09-26: 2.5s spacing
+// still drew it, and a refused call did not advance requests_today), and it
+// clears on the very next request. So a per-minute refusal is retried a couple
+// of times before it is reported; a daily-quota refusal is not, because that
+// one is real until 00:00 UTC.
+const BURST_RETRIES = 2;
+let burstRetryDelayMs = 700;
+/** Test hook: shrink the retry delay so unit tests do not sleep. */
+export function _setBurstRetryDelayMs(ms: number): void {
+  burstRetryDelayMs = ms;
+}
+
+type VendorResult =
+  | { ok: true; data: { errors?: Record<string, string> | string[]; response?: unknown }; res: Response }
+  | { ok: false; fail: ApiFootballSoftFail };
+
+async function vendorGet(url: string, apiKey: string): Promise<VendorResult> {
+  let last: ApiFootballSoftFail | null = null;
+  for (let attempt = 0; attempt <= BURST_RETRIES; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, burstRetryDelayMs * attempt));
+    const res = await pwFetch(url, { headers: headers(apiKey) });
+    if (res.status === 429) {
+      const body = (await res.text().catch(() => '')).slice(0, 400);
+      last = rateLimitSoftFail(body || 'HTTP 429 Too many requests', res.headers.get('retry-after'), Date.now());
+      if (last.reason === 'rate_limit' && last.window === 'minute') continue;
+      return { ok: false, fail: last };
+    }
+    if (res.status === 401 || res.status === 403) {
+      return {
+        ok: false,
+        fail: {
+          found: false,
+          reason: 'auth_failed',
+          hint: `API-Football auth failed (${res.status}). Verify _apiKey is a valid api-football.com key (not a RapidAPI key — different header).`,
+        },
+      };
+    }
+    if (!res.ok) {
+      return {
+        ok: false,
+        fail: {
+          found: false,
+          reason: 'upstream_error',
+          hint: `API-Football ${res.status}: ${(await res.text()).slice(0, 200)}`,
+          retry_after_sec: res.status >= 500 ? 15 : null,
+        },
+      };
+    }
+    const data = (await res.json()) as { errors?: Record<string, string> | string[]; response?: unknown };
+    const soft = classifyApiFootballBody(data, res.headers.get('retry-after'), Date.now());
+    if (soft) {
+      last = soft;
+      if (soft.reason === 'rate_limit' && soft.window === 'minute') continue;
+      return { ok: false, fail: soft };
+    }
+    return { ok: true, data, res };
+  }
+  return { ok: false, fail: last as ApiFootballSoftFail };
+}
+
 async function apiGet(path: string, params: Record<string, string | number | undefined>, apiKey: string): Promise<unknown | ApiFootballSoftFail> {
   const url = new URL(`${BASE_URL}${path}`);
   for (const [k, v] of Object.entries(params)) {
     if (v != null) url.searchParams.set(k, String(v));
   }
-  const res = await pwFetch(url.toString(), { headers: headers(apiKey) });
-  if (res.status === 429) {
-    const body = (await res.text().catch(() => '')).slice(0, 400);
-    return rateLimitSoftFail(body || 'HTTP 429 Too many requests', res.headers.get('retry-after'), Date.now());
-  }
-  if (res.status === 401 || res.status === 403) {
-    return {
-      found: false,
-      reason: 'auth_failed',
-      hint: `API-Football auth failed (${res.status}). Verify _apiKey is a valid api-football.com key (not a RapidAPI key — different header).`,
-    };
-  }
-  if (!res.ok) {
-    return {
-      found: false,
-      reason: 'upstream_error',
-      hint: `API-Football ${res.status}: ${(await res.text()).slice(0, 200)}`,
-      retry_after_sec: res.status >= 500 ? 15 : null,
-    };
-  }
-  const data = (await res.json()) as { errors?: Record<string, string> | string[]; response?: unknown };
-  const soft = classifyApiFootballBody(data, res.headers.get('retry-after'), Date.now());
-  if (soft) return soft;
-  return data.response ?? data;
+  const r = await vendorGet(url.toString(), apiKey);
+  if (!r.ok) return r.fail;
+  return r.data.response ?? r.data;
 }
 
 const tools: McpToolExport['tools'] = [
@@ -1112,24 +1154,10 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<un
       };
     }
     case 'api_football_status': {
-      const res = await pwFetch(`${BASE_URL}/status`, { headers: headers(apiKey) });
-      if (res.status === 401 || res.status === 403) {
-        return { found: false, reason: 'auth_failed', hint: `API-Football auth failed (${res.status}).` };
-      }
-      if (!res.ok) {
-        return { found: false, reason: 'upstream_error', hint: `API-Football /status ${res.status}`, retry_after_sec: res.status >= 500 ? 15 : null };
-      }
-      const body = (await res.json()) as {
-        errors?: Record<string, string> | string[];
-        response?: {
-          subscription?: { plan?: string; end?: string; active?: boolean };
-          requests?: { current?: number; limit_day?: number };
-        } | unknown[];
-      };
-      const errs = body.errors && (Array.isArray(body.errors) ? body.errors : Object.values(body.errors));
-      if (errs && errs.length > 0) {
-        return { found: false, reason: 'upstream_error', hint: `API-Football: ${errs.join('; ').slice(0, 200)}` };
-      }
+      const got = await vendorGet(`${BASE_URL}/status`, apiKey);
+      if (!got.ok) return got.fail;
+      const { res } = got;
+      const body = got.data;
       const r = (Array.isArray(body.response) ? {} : body.response ?? {}) as {
         subscription?: { plan?: string; end?: string; active?: boolean };
         requests?: { current?: number; limit_day?: number };
