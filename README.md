@@ -8,7 +8,7 @@ Part of [Pipeworx](https://pipeworx.io) — an MCP gateway connecting AI agents 
 
 | Tool | Description |
 |------|-------------|
-| `fixtures` | Get match fixtures (upcoming + recent) by league, team, or date. Use league=1 for FIFA World Cup, league=39 for EPL, league=140 for La Liga. Returns kickoff, teams, score (if played), venue, status. |
+| `fixtures` | API-Football (api-sports.io) match fixtures, upcoming and recent, by league, team, or date — hundreds of leagues and cups worldwide plus national-team competitions. Use league=1 for FIFA World Cup, league=39 for EPL, league=140 for La Liga. Returns kickoff, teams, score (if played), venue, status. |
 | `standings` | Current standings table for a league. Returns rank, team, points, goal difference, form. Use league=1 for World Cup. |
 | `team_search` | Look up a team by name + country to get its team_id for use in other tools. |
 | `league_search` | Look up a league/tournament/competition by name to get its league_id. |

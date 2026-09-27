@@ -879,7 +879,7 @@ const tools: McpToolExport['tools'] = [
   {
     name: 'fixtures',
     description:
-      'Get match fixtures (upcoming + recent) by league, team, or date. Use league=1 for FIFA World Cup, league=39 for EPL, league=140 for La Liga. Returns kickoff, teams, score (if played), venue, status.',
+      'API-Football (api-sports.io) match fixtures, upcoming and recent, by league, team, or date — hundreds of leagues and cups worldwide plus national-team competitions. Use league=1 for FIFA World Cup, league=39 for EPL, league=140 for La Liga. Returns kickoff, teams, score (if played), venue, status.',
     inputSchema: {
       type: 'object',
       properties: {
